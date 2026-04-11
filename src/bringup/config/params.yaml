@@ -136,6 +136,8 @@
     x_gain: 0.0
     y_gain: 0.0
     z_gain: 0.0
+    drag_coeff: 0.001
+    gravity: 9.80665
     pitch_gain_factor: 0.02
 
     sentray_mode: false

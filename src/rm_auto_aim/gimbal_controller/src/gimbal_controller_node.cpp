@@ -16,7 +16,9 @@ GimbalControllerNode::GimbalControllerNode() : Node("GimbalControllerNode")
     z_gain_ = declare_parameter("z_gain", 0.0);
     y_gain_ = declare_parameter("y_gain", 0.0);
     x_gain_ = declare_parameter("x_gain", 0.0);
-    pitch_gain_factor_ = declare_parameter("pitch_gain_factor", 1.0);
+    pitch_gain_factor_ = declare_parameter("pitch_gain_factor", 0.0);
+    drag_coeff_ = declare_parameter("drag_coeff", 0.001);
+    gravity_ = declare_parameter("gravity", 9.80665);
     timestamp_offset_ = this->declare_parameter("timestamp_offset", 0.0);
     is_track_ = declare_parameter("is_track", true);
     is_pitch_gain_ = declare_parameter("is_pitch_gain", true);
@@ -243,34 +245,56 @@ void GimbalControllerNode::TargetCallback(auto_aim_interfaces::msg::Target::Shar
         }
 
         // 计算需要击打的装甲板的云台姿态
-        send_pitch = atan2(z, sqrt(x * x + y * y));
+        const Eigen::Vector3d xyz(x, y, z);
+        const double geometry_pitch = std::atan2(z, std::sqrt(x * x + y * y));
+        double ballistic_pitch = geometry_pitch;
+        double pitch_trim = 0.0;
+        send_pitch = geometry_pitch;
         send_yaw = -atan2(y, x);
         send_is_fire = 0;
 
         auto_aim_interfaces::msg::DebugController debug_msg;
-        debug_msg.send_pitch = send_pitch;
         debug_msg.armor_x = x;
         debug_msg.armor_y = y;
         debug_msg.armor_z = z;
-        // 对抬枪角度进行增益
+        debug_msg.geometry_pitch = geometry_pitch;
+
+        // 使用弹道解算得到主 pitch，再叠加一个很小的现场微调量
         if(is_pitch_gain_){
             pitch_gain_factor_ = get_parameter("pitch_gain_factor").as_double();
+            drag_coeff_ = get_parameter("drag_coeff").as_double();
+            gravity_ = get_parameter("gravity").as_double();
             coord_solver_->bullet_speed = shoot_speed_;
-            Eigen::Vector3d xyz(x, y, z);
-            double send_pitch_gain = coord_solver_->dynamicCalcPitchOffset(xyz);
-            send_pitch_gain = send_pitch_gain * M_PI / 180.0;
-            debug_msg.send_pitch_gain = send_pitch_gain;
-            if(pitch_gain_factor_ > 10.0)
-                send_pitch_gain *= xyz.norm() * (pitch_gain_factor_ - 10.0);
-            else
-                send_pitch_gain *= pitch_gain_factor_;
-            send_pitch += send_pitch_gain;
+            coord_solver_->drag_coeff = drag_coeff_;
+            coord_solver_->gravity = gravity_;
+
+            if (coord_solver_->solveBallisticPitch(xyz, ballistic_pitch)) {
+                send_pitch = ballistic_pitch;
+            } else {
+                ballistic_pitch = geometry_pitch;
+                send_pitch = geometry_pitch;
+                RCLCPP_WARN_THROTTLE(
+                    this->get_logger(),
+                    *this->get_clock(),
+                    2000,
+                    "Ballistic solver failed, fallback to geometric pitch");
+            }
+
+            pitch_trim = pitch_gain_factor_;
+            send_pitch += pitch_trim;
+        }
+        debug_msg.ballistic_pitch = ballistic_pitch;
+        debug_msg.pitch_trim = pitch_trim;
+        debug_msg.send_pitch = std::isfinite(send_pitch) ? send_pitch : geometry_pitch;
+
+        if (!std::isfinite(send_pitch)) {
+            send_pitch = geometry_pitch;
+            debug_msg.send_pitch = geometry_pitch;
         }
 
         debug_pub_->publish(debug_msg);
 
         //开火控制
-        Eigen::Vector3d xyz(x, y, z);
         //装甲板尺寸内
         double shoot_diff = atan((armor_witch/2) / xyz.norm());
         RCLCPP_DEBUG(rclcpp::get_logger("lc_serial"), "SerialDriver shoot_diff: %f", shoot_diff);

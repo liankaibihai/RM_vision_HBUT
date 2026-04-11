@@ -28,11 +28,11 @@ endif()
 add_executable(gimbal_controller src/gimbal_controller_node.cpp src/coordsolver.cpp src/sinScanner.cpp)
 ament_target_dependencies(gimbal_controller
         rclcpp
-        Eigen3
         geometry_msgs
         visualization_msgs
         auto_aim_interfaces
 )
+target_link_libraries(gimbal_controller Eigen3::Eigen)
 
 install(TARGETS
         gimbal_controller

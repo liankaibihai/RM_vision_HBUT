@@ -56,11 +56,13 @@ private:
     double y_gain_;
     double x_gain_;
 
-    double pitch_gain_factor_;  //pitch动态补偿系数
+    double pitch_gain_factor_;  //pitch最终微调量
 
     double timestamp_offset_ = 0;   //时间戳偏移量
     bool is_track_;
     bool is_pitch_gain_;
+    double drag_coeff_;
+    double gravity_;
 
     bool sentray_mode_ = false;     //哨兵模式，丢失目标后云台来回扫描
     double pitch_scan_range_;       //pitch扫描幅度，单位度
